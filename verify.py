@@ -94,6 +94,7 @@ def is_single_sentence(text):
     sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text.strip())
     return len(sentences) == 1
 
+# Helper function to check if a category is valid
 def is_valid_category(category):
     return category not in ['Broad Claims:', 'Sub-Claims:', 'Remove sentence']
 
@@ -118,6 +119,10 @@ def get_sentence_context(full_text, target_sentence):
         next_sentence = sentences[target_index + 1].strip()
         return f"{previous_sentence} {highlighted_sentence} {next_sentence}".strip()
 
+# Main application logic begins here
+# file_uploader: dispaly a file uploader widget that allows user to select the file to upload.
+#  Returns: None or UploadedFile or list of UploadedFile
+# Initialize session state for storing changes and UI state
 # Initialize session state for storing changes and UI state
 if 'all_changes' not in st.session_state:
     st.session_state.all_changes = {}
@@ -173,10 +178,11 @@ if uploaded_file:
                     target_sentence = article[field]['S']
                     sentence_with_context = get_sentence_context(full_text, target_sentence)
                     st.write(sentence_with_context, unsafe_allow_html=True)
-                    st.markdown(f"**Current Categorisation:**  ")
+                    st.markdown(f"**Categorisation:**  ")
                     st.markdown(f"**{claim_type}: {claim_text}**")
 
-                    edit_categorisation = st.checkbox(f"Edit Categorisation ?",
+                    st.markdown(f"**Edit Categorisation?**")
+                    edit_categorisation = st.checkbox("",
                                                       key=f"edit_{article_id}_{sentence_count}")
 
                     if edit_categorisation:
@@ -206,7 +212,7 @@ if uploaded_file:
                     st.markdown("---")
 
             st.markdown("### Submit a Missing Categorisation?")
-            missing_categorisation = st.checkbox(f"Submit a Missing Categorisation?",
+            missing_categorisation = st.checkbox("",
                                                  key=f"missing_categorisation_{article_id}")
 
             if missing_categorisation:
@@ -236,7 +242,8 @@ if uploaded_file:
                     else:
                         st.error("Please ensure you've entered a single sentence and selected a valid category.")
 
-                add_another = st.checkbox("Submit Another Missing Categorisation?",
+                st.markdown(f"**Submit Another Missing Categorisation?**")
+                add_another = st.checkbox("",
                                           key=f"add_another_{article_id}")
 
                 if add_another:
