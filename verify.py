@@ -94,7 +94,6 @@ def is_single_sentence(text):
     sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text.strip())
     return len(sentences) == 1
 
-# Helper function to check if a category is valid
 def is_valid_category(category):
     return category not in ['Broad Claims:', 'Sub-Claims:', 'Remove sentence']
 
@@ -119,10 +118,6 @@ def get_sentence_context(full_text, target_sentence):
         next_sentence = sentences[target_index + 1].strip()
         return f"{previous_sentence} {highlighted_sentence} {next_sentence}".strip()
 
-# Main application logic begins here
-# file_uploader: dispaly a file uploader widget that allows user to select the file to upload.
-#  Returns: None or UploadedFile or list of UploadedFile
-# Initialize session state for storing changes and UI state
 # Initialize session state for storing changes and UI state
 if 'all_changes' not in st.session_state:
     st.session_state.all_changes = {}
