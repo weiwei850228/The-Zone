@@ -1,6 +1,8 @@
 import streamlit as st
 import json
-from io import StringIO, BytesIO
+import os
+from io import StringIO
+import re
 
 # Define the title
 st.title("Article Categorisation Verification Form")
@@ -15,7 +17,8 @@ claim_mapping = {
     'bc_individual_action_sentence': ('Climate Change should be addressed by individual action', 'Broad claim'),
     'sc_cold_event_denial_sentence': ('Using isolated cold weather events to deny warming', 'Sub-claim'),
     'sc_deny_extreme_weather_sentence': ('Denying the increase in extreme weather events', 'Sub-claim'),
-    'sc_deny_causal_extreme_weather_sentence': ('Denying climate change as a causal factor in extreme weather', 'Sub-claim'),
+    'sc_deny_causal_extreme_weather_sentence': (
+    'Denying climate change as a causal factor in extreme weather', 'Sub-claim'),
     'sc_natural_variations_sentence': ('Global warming is due to natural variations', 'Sub-claim'),
     'sc_past_climate_reference_sentence': ('Global warming is natural by referring to past events', 'Sub-claim'),
     'sc_species_adapt_sentence': ('Species can adapt to climate change', 'Sub-claim'),
@@ -61,28 +64,93 @@ claims_list = [
     'Remove sentence'
 ]
 
-# Helper function to map current categorization to the claims list
-def get_default_categorisation(claim_text, claim_type):
-    for claim in claims_list:
-        # Find the corresponding full string in claims_list that matches the claim text
-        if claim.endswith(claim_text):
-            return claim
-    # Return 'Please Select' if no match is found
-    return 'Please Select'
+claim_mapping_field_name = {
+    '1. Global Warming is Not Happening': 'bc_gw_not_happening_sentence',
+    '2. Global Warming is Not Caused by Human Activity': 'bc_not_caused_by_human_sentence',
+    '3. Climate Impacts are Not Bad': 'bc_impacts_not_bad_sentence',
+    '4. Climate Solutions Won’t Work': 'bc_solutions_wont_work_sentence',
+    '5. Climate Science/Movement is Unreliable': 'bc_science_movement_unrel_sentence',
+    '6. Climate Change should be addressed by individual action': 'bc_individual_action_sentence',
+    '1. Using isolated cold weather events to deny warming': 'sc_cold_event_denial_sentence',
+    '2. Denying the increase in extreme weather events': 'sc_deny_extreme_weather_sentence',
+    '3. Denying climate change as a causal factor in extreme weather': 'sc_deny_causal_extreme_weather_sentence',
+    '4. Global warming is due to natural variations': 'sc_natural_variations_sentence',
+    '5. Global warming is natural by referring to past events': 'sc_past_climate_reference_sentence',
+    '6. Species can adapt to climate change': 'sc_species_adapt_sentence',
+    '7. Downplaying the significance of a few degrees of warming': 'sc_downplay_warming_sentence',
+    '8. Climate policies cause negative side effects': 'sc_policies_negative_sentence',
+    '9. Climate policies are ineffective': 'sc_policies_ineffective_sentence',
+    '10. Addressing climate change is too difficult or impractical': 'sc_policies_difficult_sentence',
+    '11. Low public support for climate policies': 'sc_low_support_policies_sentence',
+    '12. Clean energy technologies are unreliable': 'sc_clean_energy_unreliable_sentence',
+    '13. Climate science is unreliable or invalid': 'sc_climate_science_unrel_sentence',
+    '14. Lack of scientific consensus': 'sc_no_consensus_sentence',
+    '15. Climate movement is unreliable': 'sc_movement_unreliable_sentence',
+    '16. Climate change is a deliberate hoax or conspiracy': 'sc_hoax_conspiracy_sentence',
+    'Think Tank Reference': 'think_tank_ref_sentence'
+}
 
-# File uploader for JSON format
-uploaded_file = st.file_uploader("Upload Finalized JSON File", type="json")
+def is_single_sentence(text):
+    sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text.strip())
+    return len(sentences) == 1
+
+# Helper function to check if a category is valid
+def is_valid_category(category):
+    return category not in ['Broad Claims:', 'Sub-Claims:', 'Remove sentence']
+
+def get_sentence_context(full_text, target_sentence):
+    sentences = re.split(r'(?<=[.!?])\s*', full_text.strip())
+    sentences = [s.strip() for s in sentences if s.strip()]
+    target_index = next((i for i, sentence in enumerate(sentences) if target_sentence.strip() in sentence), None)
+
+    if target_index is None:
+        return ""
+
+    highlighted_sentence = f"<b style='background-color: yellow;'>{sentences[target_index].strip()}</b>"
+
+    if target_index == 0:
+        next_sentence = sentences[target_index + 1].strip() if len(sentences) > 1 else ''
+        return f"{highlighted_sentence} {next_sentence}".strip()
+    elif target_index == len(sentences) - 1:
+        previous_sentence = sentences[target_index - 1].strip()
+        return f"{previous_sentence} {highlighted_sentence}".strip()
+    else:
+        previous_sentence = sentences[target_index - 1].strip()
+        next_sentence = sentences[target_index + 1].strip()
+        return f"{previous_sentence} {highlighted_sentence} {next_sentence}".strip()
+
+# Main application logic begins here
+# file_uploader: dispaly a file uploader widget that allows user to select the file to upload.
+#  Returns: None or UploadedFile or list of UploadedFile
+# Initialize session state for storing changes and UI state
+# Initialize session state for storing changes and UI state
+if 'all_changes' not in st.session_state:
+    st.session_state.all_changes = {}
+if 'add_another' not in st.session_state:
+    st.session_state.add_another = {}
+if 'original_filename' not in st.session_state:
+    st.session_state.original_filename = None
+
+# Main application logic begins here
+uploaded_file = st.file_uploader("Upload The JSON File", type="json")
 
 if uploaded_file:
-    # Read and load the JSON content
+    # Store the original filename
+    st.session_state.original_filename = uploaded_file.name
+
     json_file = StringIO(uploaded_file.getvalue().decode("utf-8"))
     json_data = json.load(json_file)
 
     if isinstance(json_data, list):
         articles = json_data
-        updated_articles = []
 
         for index, article in enumerate(articles, start=1):
+            article_id = article['articleId']['N']
+            if article_id not in st.session_state.all_changes:
+                st.session_state.all_changes[article_id] = {}
+            if article_id not in st.session_state.add_another:
+                st.session_state.add_another[article_id] = False
+
             st.markdown('---')
             st.markdown(f"**Article Number: {index}**")
             st.markdown(f"**Headline**: {article['title']['S']}")
@@ -106,57 +174,114 @@ if uploaded_file:
             for field, (claim_text, claim_type) in claim_mapping.items():
                 if field in article:
                     st.markdown(f"**Sentence {sentence_count}:**")
-                    st.write(article[field]['S'])
-                    st.markdown(f"**Categorisation:**  ")
+                    full_text = article['body']['S']
+                    target_sentence = article[field]['S']
+                    sentence_with_context = get_sentence_context(full_text, target_sentence)
+                    st.write(sentence_with_context, unsafe_allow_html=True)
+                    st.markdown(f"**Current Categorisation:**  ")
                     st.markdown(f"**{claim_type}: {claim_text}**")
 
-                    # Get the current categorization from the article
-                    current_categorisation = claim_text
-
-                    # Get the corresponding default categorisation from claims_list
-                    default_categorisation = get_default_categorisation(claim_text, claim_type)
-
-                    # Checkbox to edit categorization
-                    edit_categorisation = st.checkbox(f"Edit Categorisation ?", key=f"edit_{index}_{sentence_count}")
+                    edit_categorisation = st.checkbox(f"Edit Categorisation ?",
+                                                      key=f"edit_{article_id}_{sentence_count}")
 
                     if edit_categorisation:
-                        # Set the dropdown default value based on current categorisation
-                        new_categorisation = st.selectbox(f"Select different category for sentence {sentence_count}",
-                                                          claims_list,
-                                                          index=claims_list.index(default_categorisation),
-                                                          key=f"select_{index}_{sentence_count}")
+                        current_claim = next((claim for claim in claims_list if claim.endswith(claim_text)), None)
+                        current_claim_index = claims_list.index(current_claim) if current_claim else 0
+
+                        new_categorisation = st.selectbox(
+                            f"Select different category for sentence {sentence_count}, or remove",
+                            claims_list,
+                            index=current_claim_index,
+                            key=f"select_{article_id}_{sentence_count}"
+                        )
+
+                        corresponding_field = claim_mapping_field_name.get(new_categorisation, "No corresponding field")
 
                         if new_categorisation in ['Broad Claims:', 'Sub-Claims:']:
                             st.error("Please select a valid claim, not a category header.")
-                        else:
-                            if new_categorisation != 'Please Select':
-                                article[field]['S'] = new_categorisation
+                        elif new_categorisation == 'Remove sentence':
+                            st.session_state.all_changes[article_id][field] = 'REMOVE'
+                        elif new_categorisation != claim_text:
+                            new_field = claim_mapping_field_name.get(new_categorisation)
+                            if new_field:
+                                st.session_state.all_changes[article_id][field] = {'new_field': new_field,
+                                                                                   'sentence': target_sentence}
 
-                    st.markdown("---")
                     sentence_count += 1
+                    st.markdown("---")
 
             st.markdown("### Submit a Missing Categorisation?")
-            missing_categorisation = st.checkbox(f"Submit a Missing Categorisation?", key=f"missing_{index}")
+            missing_categorisation = st.checkbox(f"Submit a Missing Categorisation?",
+                                                 key=f"missing_categorisation_{article_id}")
 
             if missing_categorisation:
-                st.markdown("**Please copy the exact sentence from the full text field and paste below, then select the relevant categorisation.**")
-                missing_sentence = st.text_area("", key=f"missing_sentence_{index}")
-                if not missing_sentence.strip():
-                    st.error("This field is mandatory.")
-                missing_claim = st.selectbox("**Select Category for Sentence**", claims_list, key=f"missing_claim_{index}")
+                st.markdown(
+                    "**Please copy the exact sentence from the full text field and paste below, then select the relevant categorisation.**")
+                missing_sentence = st.text_area("Enter a single sentence (mandatory)",
+                                                key=f"missing_sentence_{article_id}")
 
-                if missing_claim in ['Broad Claims:', 'Sub-Claims:']:
-                    st.error("Please select a valid claim, not a category header.")
-                elif missing_claim != 'Please Select' and missing_sentence.strip():
-                    submit_another = st.checkbox("Submit Another Missing Categorisation?", key=f"submit_another_{index}")
+                # Check and display reminder for multiple sentences
+                if missing_sentence and not is_single_sentence(missing_sentence):
+                    st.error("Please enter only one sentence. You have entered multiple sentences.")
 
-                    if submit_another:
-                        st.text_area("Enter the next sentence:", key=f"missing_sentence_another_{index}")
-                        st.selectbox("Select Category for Next Sentence", claims_list, key=f"missing_claim_another_{index}")
+                missing_claim = st.selectbox("**Select Category for Sentence**", claims_list,
+                                             key=f"missing_claim_{article_id}")
 
-            updated_articles.append(article)
+                # Check and display reminder for invalid category selection
+                if missing_claim in ['Broad Claims:', 'Sub-Claims:', 'Remove sentence']:
+                    st.error(
+                        "Please select a valid category. 'Broad Claims', 'Sub-Claims', and 'Remove sentence' are not valid selections.")
 
-        # Add custom CSS to center the button and make it green
+                if missing_sentence and missing_claim not in ['Broad Claims:', 'Sub-Claims:']:
+                    if is_single_sentence(missing_sentence) and is_valid_category(missing_claim):
+                        field_name = claim_mapping_field_name.get(missing_claim)
+                        if field_name:
+                            new_key = f'NEW_{field_name}'
+                            st.session_state.all_changes[article_id][new_key] = {"S": missing_sentence}
+                    else:
+                        st.error("Please ensure you've entered a single sentence and selected a valid category.")
+
+                add_another = st.checkbox("Submit Another Missing Categorisation?",
+                                          key=f"add_another_{article_id}")
+
+                if add_another:
+                    st.markdown(
+                        "**Please copy the exact sentence from the full text field and paste below, then select the relevant categorisation.**")
+                    next_sentence = st.text_area("Enter a single sentence (mandatory)",
+                                                 key=f"next_sentence_{article_id}")
+
+                    # Check and display reminder for multiple sentences
+                    if next_sentence and not is_single_sentence(next_sentence):
+                        st.error("Please enter only one sentence. You have entered multiple sentences.")
+
+                    next_claim = st.selectbox("**Select Category for Sentence**", claims_list,
+                                              key=f"next_claim_{article_id}")
+
+                    # Check and display reminder for invalid category selection
+                    if next_claim in ['Broad Claims:', 'Sub-Claims:', 'Remove sentence']:
+                        st.error(
+                            "Please select a valid category. 'Broad Claims', 'Sub-Claims', and 'Remove sentence' are not valid selections.")
+
+                    if next_sentence and next_claim not in ['Broad Claims:', 'Sub-Claims:']:
+                        if is_single_sentence(next_sentence) and is_valid_category(next_claim):
+                            field_name = claim_mapping_field_name.get(next_claim)
+                            if field_name:
+                                new_key = f'NEW_{field_name}'
+                                if new_key in st.session_state.all_changes[article_id]:
+                                    if isinstance(st.session_state.all_changes[article_id][new_key]["S"], list):
+                                        if next_sentence not in st.session_state.all_changes[article_id][new_key]["S"]:
+                                            st.session_state.all_changes[article_id][new_key]["S"].append(next_sentence)
+                                    else:
+                                        if st.session_state.all_changes[article_id][new_key]["S"] != next_sentence:
+                                            st.session_state.all_changes[article_id][new_key]["S"] = [
+                                                st.session_state.all_changes[article_id][new_key]["S"],
+                                                next_sentence
+                                            ]
+                                else:
+                                    st.session_state.all_changes[article_id][new_key] = {"S": next_sentence}
+                        else:
+                            st.error("Please ensure you've entered a single sentence and selected a valid category.")
+
         st.markdown("""
         <style>
         .save-button-container {
@@ -164,26 +289,112 @@ if uploaded_file:
             justify-content: center;
         }
         .stButton button {
-            background-color: #28a745;
+            background-color: #28a745; 
             color: white;
-            padding: 10px 20px;  /* Adjust the padding for button size */
-            font-size: 16px;      /* Adjust the font size */
-            border: none;         /* Remove border */
-            border-radius: 5px;  /* Add rounded corners */
-            width: 180px;         /* Set a specific width */
-            height: 45px;        /* Set a specific height */
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            width: 180px;
+            height: 45px;
         }
         </style>
         """, unsafe_allow_html=True)
 
-        # Center the button using a container div
         with st.container():
             st.markdown('<div class="save-button-container">', unsafe_allow_html=True)
             if st.button('Save'):
-                updated_json = json.dumps(updated_articles)
-                updated_file = BytesIO(updated_json.encode())
-                st.download_button(label="Download Updated JSON", data=updated_file, file_name="updated_articles.json")
-            st.markdown('</div>', unsafe_allow_html=True)
+                validation_errors = []
+                all_valid = True
 
-    else:
-        st.error("Uploaded file is not in the expected format.")
+                for article_id, changes in st.session_state.all_changes.items():
+                    for old_field, action in changes.items():
+                        if isinstance(action, dict) and 'new_field' in action:
+                            new_field = action['new_field']
+                            sentence = action['sentence']
+                            if not sentence.strip():
+                                validation_errors.append(f"Article {article_id}, field {new_field}: Missing sentence.")
+                                all_valid = False
+                            if not is_single_sentence(sentence):
+                                validation_errors.append(
+                                    f"Article {article_id}, field {new_field}: Contains multiple sentences.")
+                                all_valid = False
+                            if not is_valid_category(new_field):
+                                validation_errors.append(
+                                    f"Article {article_id}, field {new_field}: Invalid category selected.")
+                                all_valid = False
+                        elif old_field.startswith('NEW_'):
+                            new_field = old_field[4:]
+                            if not is_valid_category(new_field):
+                                validation_errors.append(
+                                    f"Article {article_id}, new field {new_field}: Invalid category selected.")
+                                all_valid = False
+                            if isinstance(action["S"], list):
+                                for sent in action["S"]:
+                                    if not sent.strip():
+                                        validation_errors.append(
+                                            f"Article {article_id}, new field {new_field}: Missing sentence.")
+                                        all_valid = False
+                                    if not is_single_sentence(sent):
+                                        validation_errors.append(
+                                            f"Article {article_id}, new field {new_field}: Contains a multi-sentence entry.")
+                                        all_valid = False
+                            elif not action["S"].strip():
+                                validation_errors.append(
+                                    f"Article {article_id}, new field {new_field}: Missing sentence.")
+                                all_valid = False
+                            elif not is_single_sentence(action["S"]):
+                                validation_errors.append(
+                                    f"Article {article_id}, new field {new_field}: Contains multiple sentences.")
+                                all_valid = False
+
+                if validation_errors:
+                    st.error("Validation errors found:")
+                    for error in validation_errors:
+                        st.error(error)
+                    st.error(
+                        "Cannot generate JSON file due to validation errors. Please ensure all entries contain a single sentence and have a valid category selected.")
+                elif all_valid:
+                    updated_articles = []
+                    for article in articles:
+                        article_id = article['articleId']['N']
+                        if article_id in st.session_state.all_changes:
+                            changes = st.session_state.all_changes[article_id]
+                            for old_field, action in changes.items():
+                                if action == 'REMOVE':
+                                    article.pop(old_field, None)
+                                elif isinstance(action, dict) and 'new_field' in action:
+                                    new_field = action['new_field']
+                                    sentence = action['sentence']
+                                    article[new_field] = {"S": sentence}
+                                    if old_field in article:
+                                        article.pop(old_field, None)
+                                elif old_field.startswith('NEW_'):
+                                    new_field = old_field[4:]
+                                    if new_field in article:
+                                        if isinstance(article[new_field]['S'], list):
+                                            if action["S"] not in article[new_field]['S']:
+                                                article[new_field]['S'].append(action["S"])
+                                        else:
+                                            if article[new_field]['S'] != action["S"]:
+                                                article[new_field]['S'] = [article[new_field]['S'], action["S"]]
+                                    else:
+                                        article[new_field] = {"S": action["S"]}
+                        updated_articles.append(article)
+
+                    json_output = json.dumps(updated_articles, indent=4)
+
+                    # Generate the new filename
+                    if st.session_state.original_filename:
+                        base_name, ext = os.path.splitext(st.session_state.original_filename)
+                        new_filename = f"{base_name}_updated{ext}"
+                    else:
+                        new_filename = "updated_articles.json"
+
+                    st.download_button("Download Updated JSON", json_output,
+                                       file_name=new_filename, mime="application/json")
+                    st.success("All changes are valid. You can now download the updated JSON file.")
+                else:
+                    st.error(
+                        "Cannot generate JSON file due to validation errors. Please ensure all entries contain a single sentence and have a valid category selected.")
+            st.markdown('</div>', unsafe_allow_html=True)
