@@ -4,8 +4,7 @@ import os
 from io import StringIO
 import re
 import urllib
-import tempfile
-import ijson
+
 
 
 # Mapping of fields to claims and whether they are broad claims or sub-claims
