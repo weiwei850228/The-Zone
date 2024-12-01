@@ -6,7 +6,6 @@ import re
 import urllib
 
 
-
 # Mapping of fields to claims and whether they are broad claims or sub-claims
 claim_mapping = {
     'bc_gw_not_happening_sentence': ('Global Warming is Not Happening', 'Broad claim'),
@@ -106,8 +105,11 @@ def is_single_sentence(text):
     return len(sentences) == 1
 
 # Helper function to check if a category is valid
+
+
 def is_valid_category(category):
     return category not in ['Broad Claims:', 'Sub-Claims:', 'Remove sentence']
+
 
 def get_sentence_context(full_text, target_sentence):
     sentences = re.split(r'(?<=[.!?])\s*', full_text.strip())
@@ -129,6 +131,7 @@ def get_sentence_context(full_text, target_sentence):
         previous_sentence = sentences[target_index - 1].strip()
         next_sentence = sentences[target_index + 1].strip()
         return f"{previous_sentence} {highlighted_sentence} {next_sentence}".strip()
+
 
 st.markdown("""
 <style>
@@ -463,6 +466,7 @@ if uploaded_file:
                         st.rerun()
 
         # Save button container
+        # Save button container
         with st.container():
             st.markdown('<div class="save-button-container">', unsafe_allow_html=True)
             if st.button('Save', key='save_button'):
@@ -479,8 +483,16 @@ if uploaded_file:
                 elif all_valid:
                     updated_articles = []
                     for article in articles:
+                        # Create a copy of the article without the articleId field
+                        updated_article = {k: v.copy() if isinstance(v, dict) else v for k, v in article.items() if
+                                           k != 'articleId'}
+
+                        # Move 'uri' to the beginning of the article dict if it exists
+                        if 'uri' in updated_article:
+                            uri_value = updated_article.pop('uri')
+                            updated_article = {'uri': uri_value, **updated_article}
+
                         article_id = article['articleId']['N']
-                        updated_article = {k: v.copy() if isinstance(v, dict) else v for k, v in article.items()}
 
                         if article_id in st.session_state.all_changes:
                             changes = st.session_state.all_changes[article_id]
