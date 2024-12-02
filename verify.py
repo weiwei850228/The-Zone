@@ -111,6 +111,49 @@ def is_valid_category(category):
     return category not in ['Broad Claims:', 'Sub-Claims:', 'Remove sentence']
 
 
+def load_json_file(file):
+    """
+    Load and validate JSON file contents
+    Returns processed data if valid, None if invalid
+    """
+    try:
+        if isinstance(file, str):
+            # Reading from direct file path
+            with open(file, 'r', encoding='utf-8') as f:
+                json_data = json.load(f)
+        else:
+            # Reading from uploaded file through Streamlit
+            json_file = StringIO(file.getvalue().decode("utf-8"))
+            json_data = json.load(json_file)
+
+        # Validate JSON structure
+        if not isinstance(json_data, list):
+            st.error("Invalid JSON format. Expected a list of articles.")
+            return None
+
+        # Validate required fields
+        required_fields = ['uri', 'title', 'body', 'source']
+        for article in json_data:
+            missing_fields = [field for field in required_fields if field not in article]
+            if missing_fields:
+                st.error(f"Article {article.get('uri', 'Unknown')} is missing required fields: {missing_fields}")
+                return None
+
+        return json_data
+
+    except json.JSONDecodeError as e:
+        st.error(f"Invalid JSON file: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error processing file: {str(e)}")
+        return None
+
+def get_field_value(field):
+    """Extract value from either string or dict with 'S' key"""
+    if isinstance(field, dict) and 'S' in field:
+        return field['S']
+    return str(field) if field is not None else ''
+
 def get_sentence_context(full_text, target_sentence):
     sentences = re.split(r'(?<=[.!?])\s*', full_text.strip())
     sentences = [s.strip() for s in sentences if s.strip()]
@@ -237,327 +280,433 @@ if 'current_page' not in st.session_state:
 uploaded_file = st.file_uploader("", type="json")
 
 if uploaded_file:
-    # Load and process the JSON file
-    json_file = StringIO(uploaded_file.getvalue().decode("utf-8"))
-    json_data = json.load(json_file)
-    st.session_state.original_filename = uploaded_file.name
+    try:
+        # Load and process the JSON file
+        json_file = StringIO(uploaded_file.getvalue().decode("utf-8"))
+        json_data = json.load(json_file)
+        st.session_state.original_filename = uploaded_file.name
 
-    if isinstance(json_data, list):
-        articles = json_data
-        total_articles = len(articles)
+        if isinstance(json_data, list):
+            articles = json_data
+            total_articles = len(articles)
 
-        # Determine pagination strategy
-        USE_PAGINATION = total_articles > 5
-        articles_per_page = 5 if USE_PAGINATION else total_articles
+            # Determine pagination strategy
+            USE_PAGINATION = total_articles > 5
+            articles_per_page = 5 if USE_PAGINATION else total_articles
 
-        if USE_PAGINATION:
-            total_pages = (total_articles + articles_per_page - 1) // articles_per_page
-            page_numbers = list(range(total_pages))
+            if USE_PAGINATION:
+                total_pages = (total_articles + articles_per_page - 1) // articles_per_page
+                page_numbers = list(range(total_pages))
 
-            # Page navigation
-            col1, col2, col3 = st.columns([1, 2, 1])
-            with col2:
-                if total_pages > 1:
-                    current_page = st.select_slider(
-                        "Select page",
-                        options=page_numbers,
-                        value=min(st.session_state.current_page, total_pages - 1),
-                        format_func=lambda x: f"Page {x + 1}",
-                        key='page_selector'
-                    )
-                    st.session_state.current_page = current_page
-                else:
-                    current_page = 0
-                    st.session_state.current_page = 0
-
-            start_idx = current_page * articles_per_page
-            end_idx = min(start_idx + articles_per_page, total_articles)
-
-            st.markdown(
-                f"<p style='text-align: center'>Showing articles {start_idx + 1} to {end_idx} of {total_articles}</p>",
-                unsafe_allow_html=True)
-
-            current_articles = articles[start_idx:end_idx]
-        else:
-            current_articles = articles
-            if total_articles > 0:
-                st.markdown(f"<p style='text-align: center'>Showing all {total_articles} articles</p>",
-                            unsafe_allow_html=True)
-
-        # Process articles
-        for index, article in enumerate(current_articles, start=1 if not USE_PAGINATION else start_idx + 1):
-            article_id = article['articleId']['N']
-
-            # Initialize session state for current article
-            if article_id not in st.session_state.all_changes:
-                st.session_state.all_changes[article_id] = {}
-            if article_id not in st.session_state.add_another:
-                st.session_state.add_another[article_id] = False
-
-            # Article container
-            with st.container():
-                st.markdown('---')
-
-                # Header section
-                header_html = f'''
-                    <p class="article_number">Article Number: {index}</p>
-                    <p class="headline"><strong>Headline</strong>: {article["title"]["S"]}</p>
-                '''
-                st.markdown(header_html, unsafe_allow_html=True)
-
-                # Source section
-                col1, col2 = st.columns([0.15, 1])
-                with col1:
-                    st.markdown('<p class="source"><strong>Source:</strong></p>', unsafe_allow_html=True)
+                # Page navigation
+                col1, col2, col3 = st.columns([1, 2, 1])
                 with col2:
-                    with st.expander("[reveal]", expanded=False):
-                        st.markdown(f'<p class="source">{article["source"]["S"]}</p>', unsafe_allow_html=True)
-
-                # Full text section
-                col1, col2 = st.columns([0.15, 1])
-                with col1:
-                    st.markdown('<p class="full-text"><strong>Full Text:</strong></p>', unsafe_allow_html=True)
-                with col2:
-                    with st.expander("[reveal]", expanded=False):
-                        st.markdown(f'<p class="full-text">{article["body"]["S"]}</p>', unsafe_allow_html=True)
-
-                # Process sentences
-                sentence_count = 1
-                for field in article.keys():
-                    if field in claim_mapping:
-                        claim_text, claim_type = claim_mapping[field]
-                        target_sentence = article[field]['S']
-                        sentence_with_context = get_sentence_context(article['body']['S'], target_sentence)
-
-                        # Sentence display
-                        sentence_html = f'''
-                            <p class="sentence-text"><strong>Sentence {sentence_count}:</strong></p>
-                            <p class="sentence-text">{sentence_with_context}</p>
-                            <p class="categorisation-head"><strong>Categorisation:</strong></p>
-                            <p class="categorisation-text"><strong>{claim_type}</strong>: {claim_text}</p>
-                        '''
-                        st.markdown(sentence_html, unsafe_allow_html=True)
-
-                        # Edit categorization
-                        edit_key = f"edit_{article_id}_{sentence_count}"
-                        if st.checkbox("Edit Categorisation?", key=edit_key):
-                            current_claim = next((claim for claim in claims_list if claim.endswith(claim_text)), None)
-                            current_claim_index = claims_list.index(current_claim) if current_claim else 0
-
-                            new_categorisation = st.selectbox(
-                                f"Select different category for sentence {sentence_count}, or remove",
-                                claims_list,
-                                index=current_claim_index,
-                                key=f"select_{article_id}_{sentence_count}"
-                            )
-
-                            if new_categorisation in ['Broad Claims:', 'Sub-Claims:']:
-                                st.markdown(
-                                    '<p class="error-message">Please select a specific claim, not "Broad Claims" or "Sub-Claims".</p>',
-                                    unsafe_allow_html=True
-                                )
-                            elif new_categorisation == 'Remove sentence':
-                                st.session_state.all_changes[article_id][field] = 'REMOVE'
-                            elif new_categorisation != claim_text:
-                                new_field = claim_mapping_field_name.get(new_categorisation)
-                                if new_field:
-                                    st.session_state.all_changes[article_id][field] = {
-                                        'new_field': new_field,
-                                        'sentence': target_sentence
-                                    }
-
-                        sentence_count += 1
-                        st.markdown("---")
-
-                # Missing categorization section
-                st.markdown('<h3 class="missing-categorisation">Submit a Missing Categorisation?</h3>',
-                            unsafe_allow_html=True)
-                missing_categorisation = st.checkbox("", key=f"missing_categorisation_{article_id}")
-
-                if missing_categorisation:
-                    st.markdown(
-                        '<p class="instruction">Please copy the exact sentence from the full text field and paste below, then select the relevant categorisation.</p>',
-                        unsafe_allow_html=True
-                    )
-                    missing_sentence = st.text_area("Enter a single sentence (mandatory)",
-                                                    key=f"missing_sentence_{article_id}")
-
-                    if missing_sentence and not is_single_sentence(missing_sentence):
-                        st.markdown(
-                            '<p class="error-message">Please enter only one sentence. You have entered multiple sentences.</p>',
-                            unsafe_allow_html=True)
-
-                    missing_claim = st.selectbox("Select Category for Sentence",
-                                                 claims_list,
-                                                 key=f"missing_claim_{article_id}")
-
-                    if missing_claim in ['Broad Claims:', 'Sub-Claims:', 'Remove sentence']:
-                        st.markdown(
-                            '<p class="error-message">Please select a valid category. \'Broad Claims\', \'Sub-Claims\', and \'Remove sentence\' are not valid category.</p>',
-                            unsafe_allow_html=True
+                    if total_pages > 1:
+                        current_page = st.select_slider(
+                            "Select page",
+                            options=page_numbers,
+                            value=min(st.session_state.current_page, total_pages - 1),
+                            format_func=lambda x: f"Page {x + 1}",
+                            key='page_selector'
                         )
+                        st.session_state.current_page = current_page
+                    else:
+                        current_page = 0
+                        st.session_state.current_page = 0
 
-                    if missing_sentence and missing_claim not in ['Broad Claims:', 'Sub-Claims:']:
-                        if is_single_sentence(missing_sentence) and is_valid_category(missing_claim):
-                            field_name = claim_mapping_field_name.get(missing_claim)
-                            if field_name:
-                                new_key = f'NEW_{field_name}'
-                                st.session_state.all_changes[article_id][new_key] = {"S": missing_sentence}
+                start_idx = current_page * articles_per_page
+                end_idx = min(start_idx + articles_per_page, total_articles)
 
-                    st.markdown('<p class="add-another"><strong>Submit Another Missing Categorisation?</strong></p>',
+                st.markdown(
+                    f"<p style='text-align: center'>Showing articles {start_idx + 1} to {end_idx} of {total_articles}</p>",
+                    unsafe_allow_html=True)
+
+                current_articles = articles[start_idx:end_idx]
+            else:
+                current_articles = articles
+                if total_articles > 0:
+                    st.markdown(f"<p style='text-align: center'>Showing all {total_articles} articles</p>",
                                 unsafe_allow_html=True)
-                    add_another = st.checkbox("", key=f"add_another_{article_id}")
 
-                    if add_another:
+            # Process articles
+            for index, article in enumerate(current_articles, start=1 if not USE_PAGINATION else start_idx + 1):
+                article_id = str(index)
+
+                # Initialize session state for current article
+                if article_id not in st.session_state.all_changes:
+                    st.session_state.all_changes[article_id] = {}
+                if article_id not in st.session_state.add_another:
+                    st.session_state.add_another[article_id] = False
+
+                # Article container
+                with st.container():
+                    st.markdown('---')
+
+                    # Header section with error handling
+                    title = article.get('title', 'No title available')
+                    if isinstance(title, dict):
+                        title = title.get('S', 'No title available')
+                    header_html = f'''
+                        <p class="article_number">Article Number: {index}</p>
+                        <p class="headline"><strong>Headline</strong>: {title}</p>
+                    '''
+                    st.markdown(header_html, unsafe_allow_html=True)
+
+                    # Source section
+                    col1, col2 = st.columns([0.15, 1])
+                    with col1:
+                        st.markdown('<p class="source"><strong>Source:</strong></p>', unsafe_allow_html=True)
+                    with col2:
+                        with st.expander("[reveal]", expanded=False):
+                            source = article.get('source', 'Source not available')
+                            if isinstance(source, dict):
+                                source = source.get('S', 'Source not available')
+                            st.markdown(f'<p class="source">{source}</p>', unsafe_allow_html=True)
+
+                    # Full text section
+                    col1, col2 = st.columns([0.15, 1])
+                    with col1:
+                        st.markdown('<p class="full-text"><strong>Full Text:</strong></p>', unsafe_allow_html=True)
+                    with col2:
+                        with st.expander("[reveal]", expanded=False):
+                            body = article.get('body', 'Body text not available')
+                            if isinstance(body, dict):
+                                body = body.get('S', 'Body text not available')
+                            st.markdown(f'<p class="full-text">{body}</p>', unsafe_allow_html=True)
+
+                    # Process sentences
+                    sentence_count = 1
+                    for field in article.keys():
+                        if field in claim_mapping:
+                            try:
+                                claim_text, claim_type = claim_mapping[field]
+
+                                # Get target sentence safely
+                                target_sentence = article[field]
+                                if isinstance(target_sentence, dict) and 'S' in target_sentence:
+                                    target_sentence = target_sentence['S']
+                                else:
+                                    target_sentence = str(target_sentence)
+
+                                # Get article body in a consistent format
+                                article_body = article.get('body')
+                                if isinstance(article_body, dict) and 'S' in article_body:
+                                    article_body = article_body['S']
+                                else:
+                                    article_body = str(article_body or '')
+
+                                # Split into sentences more precisely
+                                # First, temporarily replace [link] to avoid interference with sentence splitting
+                                article_body = article_body.replace('[link]', '<<LINK_MARKER>>')
+
+                                # Split sentences using regex that handles various end punctuation
+                                sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', article_body)
+                                sentences = [s.strip() for s in sentences if s.strip()]
+
+                                # Restore [link] markers
+                                sentences = [s.replace('<<LINK_MARKER>>', '[link]') for s in sentences]
+
+                                # Find the exact target sentence and its position
+                                target_index = -1
+                                for i, sentence in enumerate(sentences):
+                                    if target_sentence.strip() in sentence:
+                                        target_index = i
+                                        break
+
+                                # Get context with exactly one sentence before and after
+                                context_sentences = []
+                                if target_index >= 0:
+                                    # Add one previous sentence if available
+                                    if target_index > 0:
+                                        prev_sentence = sentences[target_index - 1].strip()
+                                        if prev_sentence:
+                                            context_sentences.append(prev_sentence)
+
+                                    # Add target sentence
+                                    context_sentences.append(sentences[target_index].strip())
+
+                                    # Add one next sentence if available, excluding anything after [link]
+                                    if target_index < len(sentences) - 1:
+                                        next_sentence = sentences[target_index + 1].strip()
+                                        if next_sentence:
+                                            # If sentence contains [link], split before it
+                                            if '[link]' in next_sentence:
+                                                next_sentence = next_sentence.split('[link]')[0].strip()
+                                            context_sentences.append(next_sentence)
+
+                                    # Join sentences and highlight target
+                                    sentence_with_context = " ".join(context_sentences)
+                                    sentence_with_context = sentence_with_context.replace(
+                                        target_sentence,
+                                        f"<b style='background-color: #e80000;'>{target_sentence}</b>"
+                                    )
+                                else:
+                                    # Fallback if target sentence not found
+                                    sentence_with_context = f"<b style='background-color: #e80000;'>{target_sentence}</b>"
+
+                                # Display with consistent format
+                                sentence_html = f'''
+                                                        <p class="sentence-text"><strong>Sentence {sentence_count}:</strong></p>
+                                                        <p class="sentence-text">{sentence_with_context}</p>
+                                                        <p class="categorisation-head"><strong>Categorisation:</strong></p>
+                                                        <p class="categorisation-text"><strong>{claim_type}</strong>: {claim_text}</p>
+                                                    '''
+                                st.markdown(sentence_html, unsafe_allow_html=True)
+
+                                # Edit categorization section
+                                edit_key = f"edit_{article_id}_{sentence_count}"
+                                if st.checkbox("Edit Categorisation?", key=edit_key):
+                                    current_claim = next((claim for claim in claims_list if claim.endswith(claim_text)),
+                                                         None)
+                                    current_claim_index = claims_list.index(current_claim) if current_claim else 0
+
+                                    new_categorisation = st.selectbox(
+                                        f"Select different category for sentence {sentence_count}, or remove",
+                                        claims_list,
+                                        index=current_claim_index,
+                                        key=f"select_{article_id}_{sentence_count}"
+                                    )
+
+                                    if new_categorisation in ['Broad Claims:', 'Sub-Claims:']:
+                                        st.markdown(
+                                            '<p class="error-message">Please select a specific claim, not "Broad Claims" or "Sub-Claims".</p>',
+                                            unsafe_allow_html=True
+                                        )
+                                    elif new_categorisation == 'Remove sentence':
+                                        st.session_state.all_changes[article_id][field] = 'REMOVE'
+                                    elif new_categorisation != claim_text:
+                                        new_field = claim_mapping_field_name.get(new_categorisation)
+                                        if new_field:
+                                            st.session_state.all_changes[article_id][field] = {
+                                                'new_field': new_field,
+                                                'sentence': target_sentence
+                                            }
+
+                                sentence_count += 1
+                                st.markdown("---")
+                            except Exception as e:
+                                st.error(f"Error processing sentence {sentence_count}: {str(e)}")
+                                continue
+
+                    # Missing categorization section
+                    st.markdown('<h3 class="missing-categorisation">Submit a Missing Categorisation?</h3>',
+                                unsafe_allow_html=True)
+                    missing_categorisation = st.checkbox("", key=f"missing_categorisation_{article_id}")
+
+                    if missing_categorisation:
                         st.markdown(
                             '<p class="instruction">Please copy the exact sentence from the full text field and paste below, then select the relevant categorisation.</p>',
                             unsafe_allow_html=True
                         )
-                        next_sentence = st.text_area("Enter a single sentence (mandatory)",
-                                                     key=f"next_sentence_{article_id}")
+                        missing_sentence = st.text_area("Enter a single sentence (mandatory)",
+                                                        key=f"missing_sentence_{article_id}")
 
-                        if next_sentence and not is_single_sentence(next_sentence):
+                        if missing_sentence and not is_single_sentence(missing_sentence):
                             st.markdown(
                                 '<p class="error-message">Please enter only one sentence. You have entered multiple sentences.</p>',
                                 unsafe_allow_html=True)
 
-                        next_claim = st.selectbox("Select Category for Sentence",
-                                                  claims_list,
-                                                  key=f"next_claim_{article_id}")
+                        missing_claim = st.selectbox("Select Category for Sentence",
+                                                     claims_list,
+                                                     key=f"missing_claim_{article_id}")
 
-                        if next_claim in ['Broad Claims:', 'Sub-Claims:', 'Remove sentence']:
+                        if missing_claim in ['Broad Claims:', 'Sub-Claims:', 'Remove sentence']:
                             st.markdown(
-                                '<p class="error-message">Please select a valid category. \'Broad Claims\', \'Sub-Claims\', and \'Remove sentence\' are not valid selections.</p>',
+                                '<p class="error-message">Please select a valid category. \'Broad Claims\', \'Sub-Claims\', and \'Remove sentence\' are not valid category.</p>',
                                 unsafe_allow_html=True
                             )
 
-                        if next_sentence and next_claim not in ['Broad Claims:', 'Sub-Claims:']:
-                            if is_single_sentence(next_sentence) and is_valid_category(next_claim):
-                                field_name = claim_mapping_field_name.get(next_claim)
+                        if missing_sentence and missing_claim not in ['Broad Claims:', 'Sub-Claims:']:
+                            if is_single_sentence(missing_sentence) and is_valid_category(missing_claim):
+                                field_name = claim_mapping_field_name.get(missing_claim)
                                 if field_name:
                                     new_key = f'NEW_{field_name}'
-                                    if new_key in st.session_state.all_changes[article_id]:
-                                        if isinstance(st.session_state.all_changes[article_id][new_key]["S"], list):
-                                            if next_sentence not in st.session_state.all_changes[article_id][new_key][
-                                                "S"]:
-                                                st.session_state.all_changes[article_id][new_key]["S"].append(
-                                                    next_sentence)
+                                    st.session_state.all_changes[article_id][new_key] = {"S": missing_sentence}
+
+                        st.markdown(
+                            '<p class="add-another"><strong>Submit Another Missing Categorisation?</strong></p>',
+                            unsafe_allow_html=True)
+                        add_another = st.checkbox("", key=f"add_another_{article_id}")
+
+                        if add_another:
+                            st.markdown(
+                                '<p class="instruction">Please copy the exact sentence from the full text field and paste below, then select the relevant categorisation.</p>',
+                                unsafe_allow_html=True
+                            )
+                            next_sentence = st.text_area("Enter a single sentence (mandatory)",
+                                                         key=f"next_sentence_{article_id}")
+
+                            if next_sentence and not is_single_sentence(next_sentence):
+                                st.markdown(
+                                    '<p class="error-message">Please enter only one sentence. You have entered multiple sentences.</p>',
+                                    unsafe_allow_html=True)
+
+                            next_claim = st.selectbox("Select Category for Sentence",
+                                                      claims_list,
+                                                      key=f"next_claim_{article_id}")
+
+                            if next_claim in ['Broad Claims:', 'Sub-Claims:', 'Remove sentence']:
+                                st.markdown(
+                                    '<p class="error-message">Please select a valid category. \'Broad Claims\', \'Sub-Claims\', and \'Remove sentence\' are not valid selections.</p>',
+                                    unsafe_allow_html=True
+                                )
+
+                            if next_sentence and next_claim not in ['Broad Claims:', 'Sub-Claims:']:
+                                if is_single_sentence(next_sentence) and is_valid_category(next_claim):
+                                    field_name = claim_mapping_field_name.get(next_claim)
+                                    if field_name:
+                                        new_key = f'NEW_{field_name}'
+                                        if new_key in st.session_state.all_changes[article_id]:
+                                            if isinstance(st.session_state.all_changes[article_id][new_key]["S"], list):
+                                                if next_sentence not in \
+                                                        st.session_state.all_changes[article_id][new_key]["S"]:
+                                                    st.session_state.all_changes[article_id][new_key]["S"].append(
+                                                        next_sentence)
+                                            else:
+                                                if st.session_state.all_changes[article_id][new_key][
+                                                    "S"] != next_sentence:
+                                                    st.session_state.all_changes[article_id][new_key]["S"] = [
+                                                        st.session_state.all_changes[article_id][new_key]["S"],
+                                                        next_sentence
+                                                    ]
                                         else:
-                                            if st.session_state.all_changes[article_id][new_key]["S"] != next_sentence:
-                                                st.session_state.all_changes[article_id][new_key]["S"] = [
-                                                    st.session_state.all_changes[article_id][new_key]["S"],
-                                                    next_sentence
-                                                ]
+                                            st.session_state.all_changes[article_id][new_key] = {"S": next_sentence}
+
+            # Navigation buttons for pagination
+            if USE_PAGINATION and total_pages > 1:
+                col1, col2 = st.columns(2)
+                with col1:
+                    if current_page > 0:
+                        if st.button("← Previous Page"):
+                            st.session_state.current_page -= 1
+                            st.rerun()
+                with col2:
+                    if current_page < total_pages - 1:
+                        if st.button("Next Page →"):
+                            st.session_state.current_page += 1
+                            st.rerun()
+
+            # Save button container
+            with st.container():
+                st.markdown('<div class="save-button-container">', unsafe_allow_html=True)
+                if st.button('Save', key='save_button'):
+                    validation_errors = []
+                    all_valid = True
+
+                    if validation_errors:
+                        st.error("Validation errors found:")
+                        for error in validation_errors:
+                            st.markdown(f'<p class="error-message">{error}</p>', unsafe_allow_html=True)
+                        st.markdown(
+                            '<p class="error-message">Cannot generate JSON file due to validation errors. Please ensure all entries contain a single sentence and have a valid category selected.</p>',
+                            unsafe_allow_html=True)
+                    elif all_valid:
+                        updated_articles = []
+                        for article in articles:
+                            # Create initial copy with {"S": value} format
+                            updated_article = {}
+
+                            # Process each field to ensure {"S": value} format
+                            for k, v in article.items():
+                                if k != 'articleId':  # Skip articleId field
+                                    if isinstance(v, dict) and 'S' in v:
+                                        # Already in correct format
+                                        updated_article[k] = v.copy()
+                                    elif isinstance(v, str):
+                                        # Convert string to {"S": value} format
+                                        updated_article[k] = {"S": v}
                                     else:
-                                        st.session_state.all_changes[article_id][new_key] = {"S": next_sentence}
+                                        # Handle other types by converting to string
+                                        updated_article[k] = {"S": str(v)}
 
-        # Navigation buttons for pagination
-        if USE_PAGINATION and total_pages > 1:
-            col1, col2 = st.columns(2)
-            with col1:
-                if current_page > 0:
-                    if st.button("← Previous Page"):
-                        st.session_state.current_page -= 1
-                        st.rerun()
-            with col2:
-                if current_page < total_pages - 1:
-                    if st.button("Next Page →"):
-                        st.session_state.current_page += 1
-                        st.rerun()
+                            # Move 'uri' to the beginning if it exists
+                            if 'uri' in updated_article:
+                                uri_value = updated_article.pop('uri')
+                                updated_article = {'uri': uri_value, **updated_article}
 
-        # Save button container
-        # Save button container
-        with st.container():
-            st.markdown('<div class="save-button-container">', unsafe_allow_html=True)
-            if st.button('Save', key='save_button'):
-                validation_errors = []
-                all_valid = True
+                            article_id = str(articles.index(article) + 1)
 
-                if validation_errors:
-                    st.error("Validation errors found:")
-                    for error in validation_errors:
-                        st.markdown(f'<p class="error-message">{error}</p>', unsafe_allow_html=True)
-                    st.markdown(
-                        '<p class="error-message">Cannot generate JSON file due to validation errors. Please ensure all entries contain a single sentence and have a valid category selected.</p>',
-                        unsafe_allow_html=True)
-                elif all_valid:
-                    updated_articles = []
-                    for article in articles:
-                        # Create a copy of the article without the articleId field
-                        updated_article = {k: v.copy() if isinstance(v, dict) else v for k, v in article.items() if
-                                           k != 'articleId'}
+                            # Process changes
+                            if article_id in st.session_state.all_changes:
+                                changes = st.session_state.all_changes[article_id]
+                                fields_to_remove = set()
+                                fields_to_add = {}
 
-                        # Move 'uri' to the beginning of the article dict if it exists
-                        if 'uri' in updated_article:
-                            uri_value = updated_article.pop('uri')
-                            updated_article = {'uri': uri_value, **updated_article}
-
-                        article_id = article['articleId']['N']
-
-                        if article_id in st.session_state.all_changes:
-                            changes = st.session_state.all_changes[article_id]
-                            fields_to_remove = set()
-                            fields_to_add = {}
-
-                            for field in article.keys():
-                                if field in claim_mapping:
-                                    if field in changes:
-                                        if changes[field] == 'REMOVE':
-                                            fields_to_remove.add(field)
-                                        elif isinstance(changes[field], dict) and 'new_field' in changes[field]:
-                                            new_field = changes[field]['new_field']
-                                            sentence = changes[field]['sentence']
-                                            fields_to_add[new_field] = {"S": sentence}
-                                            if field != new_field:
+                                # Handle claim fields
+                                for field in article.keys():
+                                    if field in claim_mapping:
+                                        if field in changes:
+                                            if changes[field] == 'REMOVE':
                                                 fields_to_remove.add(field)
-                                    else:
-                                        updated_article[field] = article[field]
-
-                            for field in fields_to_remove:
-                                updated_article.pop(field, None)
-
-                            for field, value in fields_to_add.items():
-                                updated_article[field] = value
-
-                            for field, value in changes.items():
-                                if field.startswith('NEW_'):
-                                    new_field = field[4:]
-                                    if new_field in updated_article:
-                                        current_value = updated_article[new_field]['S']
-                                        new_value = value["S"]
-
-                                        if isinstance(current_value, list):
-                                            if isinstance(new_value, list):
-                                                current_value.extend(s for s in new_value if s not in current_value)
-                                            elif new_value not in current_value:
-                                                current_value.append(new_value)
+                                            elif isinstance(changes[field], dict) and 'new_field' in changes[field]:
+                                                new_field = changes[field]['new_field']
+                                                sentence = changes[field]['sentence']
+                                                fields_to_add[new_field] = {"S": sentence}
+                                                if field != new_field:
+                                                    fields_to_remove.add(field)
                                         else:
-                                            if isinstance(new_value, list):
-                                                updated_article[new_field]['S'] = [current_value] + [s for s in
-                                                                                                     new_value if
-                                                                                                     s != current_value]
-                                            elif new_value != current_value:
-                                                updated_article[new_field]['S'] = [current_value, new_value]
-                                    else:
-                                        updated_article[new_field] = {"S": value["S"]}
+                                            # Preserve original claim field if not changed
+                                            if field in article:
+                                                value = article[field]
+                                                if isinstance(value, dict) and 'S' in value:
+                                                    updated_article[field] = value.copy()
+                                                else:
+                                                    updated_article[field] = {"S": str(value)}
 
-                        updated_articles.append(updated_article)
+                                # Remove fields marked for removal
+                                for field in fields_to_remove:
+                                    updated_article.pop(field, None)
 
-                    json_output = json.dumps(updated_articles, indent=4)
-                    # Generate new filename
-                    if st.session_state.original_filename:
-                        base_name, ext = os.path.splitext(st.session_state.original_filename)
-                        new_filename = f"{base_name}_updated{ext}"
+                                # Add new fields
+                                for field, value in fields_to_add.items():
+                                    updated_article[field] = value
+
+                                # Handle new claims
+                                for field, value in changes.items():
+                                    if field.startswith('NEW_'):
+                                        new_field = field[4:]
+                                        if new_field in updated_article:
+                                            current_value = updated_article[new_field]['S']
+                                            new_value = value["S"]
+
+                                            if isinstance(current_value, list):
+                                                if isinstance(new_value, list):
+                                                    current_value.extend(s for s in new_value if s not in current_value)
+                                                elif new_value not in current_value:
+                                                    current_value.append(new_value)
+                                                updated_article[new_field] = {"S": current_value}
+                                            else:
+                                                if isinstance(new_value, list):
+                                                    updated_article[new_field] = {
+                                                        "S": [current_value] + [s for s in new_value if
+                                                                                s != current_value]}
+                                                elif new_value != current_value:
+                                                    updated_article[new_field] = {"S": [current_value, new_value]}
+                                        else:
+                                            updated_article[new_field] = {"S": value["S"]}
+
+                            updated_articles.append(updated_article)
+
+                        json_output = json.dumps(updated_articles, indent=4)
+                        # Generate new filename
+                        if st.session_state.original_filename:
+                            base_name, ext = os.path.splitext(st.session_state.original_filename)
+                            new_filename = f"{base_name}_updated{ext}"
+                        else:
+                            new_filename = "updated_articles.json"
+
+                        # Create download link
+                        download_link = f'<a href="data:application/json;charset=utf-8,{urllib.parse.quote(json_output)}" download="{new_filename}" class="download-button">Download Updated JSON</a>'
+                        st.markdown(download_link, unsafe_allow_html=True)
+
+                        st.success("All changes are valid. You can now download the updated JSON file.")
                     else:
-                        new_filename = "updated_articles.json"
-
-                    # Create download link
-                    download_link = f'<a href="data:application/json;charset=utf-8,{urllib.parse.quote(json_output)}" download="{new_filename}" class="download-button">Download Updated JSON</a>'
-                    st.markdown(download_link, unsafe_allow_html=True)
-
-                    st.success("All changes are valid. You can now download the updated JSON file.")
-                else:
-                    st.markdown(
-                        '<p class="error-message">Cannot generate JSON file due to validation errors. Please ensure all entries contain a single sentence and have a valid category selected.</p>',
-                        unsafe_allow_html=True)
+                        st.markdown(
+                            '<p class="error-message">Cannot generate JSON file due to validation errors. Please ensure all entries contain a single sentence and have a valid category selected.</p>',
+                            unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
+
+    except json.JSONDecodeError as e:
+        st.error(f"Error decoding JSON file: {str(e)}")
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
