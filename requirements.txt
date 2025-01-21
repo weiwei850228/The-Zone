@@ -3,4 +3,5 @@ streamlit==1.40.1
 pandas==2.2.3
 polars==1.17.1
 scipy
+yfinance
 scikit-learn==1.5.2
