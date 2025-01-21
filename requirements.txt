@@ -5,3 +5,4 @@ polars==1.17.1
 scipy
 yfinance
 scikit-learn==1.5.2
+plotly
