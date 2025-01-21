@@ -1,3 +1,4 @@
+pip==24.3.1
 streamlit==1.40.1
 pandas==2.2.3
 polars==1.17.1
