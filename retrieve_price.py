@@ -4,18 +4,19 @@ import yfinance as yf
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import pandas_ta as ta
 
 
 @st.cache_data
-def retrieve_data(ticker, start_date, end_date):
+def retrieve_data(ticker, s_date, e_date):
     """
     Retrieve stock data for Australian market
     """
     try:
         # Download data
         ticker_df = yf.download(ticker,
-                                start=start_date,
-                                end=end_date + timedelta(days=1))
+                                start=s_date,
+                                end=e_date + timedelta(days=1))
 
         if ticker_df.empty:
             st.error(f"No data found for {ticker}")
@@ -32,11 +33,11 @@ def retrieve_data(ticker, start_date, end_date):
         ticker_df['Date'] = ticker_df.index.date
         ticker_df = ticker_df.reset_index(drop=True)
 
-        # Round prices to 3 decimal places
+        # Round prices to 2 decimal places
         price_columns = ['Open', 'High', 'Low', 'Close']
-        ticker_df[price_columns] = ticker_df[price_columns].round(3)
+        ticker_df[price_columns] = ticker_df[price_columns].round(2)
 
-        # Add ticker column for reference
+        # Add ticker column
         ticker_df['ticker'] = ticker
 
         return ticker_df
@@ -82,37 +83,57 @@ def display_price_metrics(stock_data):
         )
 
 
-def visualize_data(stock_data, chart_type):
+def visualize_data(stock_data, chart_type, indicator_type):
     if stock_data.empty:
         st.warning("No data available for visualization")
         return
 
     if chart_type == "Line Chart":
-        fig = px.line(stock_data,
-                      x='Date',
-                      y='Close',
-                      title=f'Line Chart of Closing Prices - {stock_data["ticker"].iloc[0].replace(".AX", "")}')
+        fig = go.Figure()
 
-        # Add price labels on hover
-        fig.update_traces(
-            hovertemplate="<br>".join([
-                "Date: %{x}",
-                "Price: $%{y:.2f}",
-            ])
+        # Add closing price trace
+        fig.add_trace(
+            go.Scatter(
+                x=stock_data['Date'],
+                y=stock_data['Close'],
+                name='Close Price',
+                line=dict(color='blue', width=1.5),
+                hovertemplate="Date: %{x}<br>Close: $%{y:.2f}<extra></extra>"
+            )
         )
 
-        # Update layout
+        # Add indicator trace
+        fig.add_trace(
+            go.Scatter(
+                x=stock_data['Date'],
+                y=stock_data[indicator_type],
+                name=indicator_type.upper(),
+                line=dict(color='red', width=1.5),
+                hovertemplate=f"{indicator_type.upper()}: $%{{y:.2f}}<br><extra></extra>"
+            )
+        )
+
         fig.update_layout(
+            title=f'Price and {indicator_type.upper()} - {stock_data["ticker"].iloc[0].replace(".AX", "")}',
             xaxis_title='Date',
-            yaxis_title='Closing Price (AUD)',
-            hovermode='x unified'
+            yaxis_title='Price (AUD)',
+            hovermode='x unified',
+            showlegend=True,
+            legend=dict(
+                orientation="v",
+                yanchor="middle",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
         )
+
         st.plotly_chart(fig, use_container_width=True)
 
     elif chart_type == "Candlestick":
         fig = go.Figure(data=[go.Candlestick(
             x=stock_data['Date'],
-            open=stock_data['Open'],
+        open=stock_data['Open'],
             high=stock_data['High'],
             low=stock_data['Low'],
             close=stock_data['Close']
@@ -150,16 +171,6 @@ def visualize_data(stock_data, chart_type):
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    elif chart_type == "Histogram":
-        stock_data['Return'] = stock_data['Close'].pct_change().dropna()
-        fig = px.histogram(
-            stock_data,
-            x='Return',
-            title=f'Distribution of Daily Returns - {stock_data["ticker"].iloc[0].replace(".AX", "")}',
-            labels={'Return': 'Daily Returns (%)'},
-            nbins=50
-        )
-
         # Add return labels on hover
         fig.update_traces(
             hovertemplate="<br>".join([
@@ -176,9 +187,26 @@ def visualize_data(stock_data, chart_type):
         st.plotly_chart(fig, use_container_width=True)
 
 
+def calculate_indicators(stock_data, indicator_type):
+    if indicator_type == "dema":
+        stock_data["dema"] = ta.dema(stock_data["Close"], length=10)
+        return stock_data[stock_data["dema"] > 0]
+    elif indicator_type == "ema":
+        stock_data["ema"] = ta.ema(stock_data["Close"], length=10)
+        return stock_data[stock_data["ema"] > 0]
+    elif indicator_type == "sma":
+        stock_data["sma"] = ta.sma(stock_data["Close"], length=10)
+        stock_data = stock_data[stock_data["sma"] > 0]
+        return stock_data
+    elif indicator_type == "wma":
+        stock_data["wma"] = ta.wma(stock_data["Close"], length=10)
+        stock_data = stock_data[stock_data["wma"] > 0]
+        return stock_data
+
+
 # Main execution flow
 if 'ticker' not in st.session_state:
-    st.error("No ticker available in session state")
+    st.error("No ticker available in session state, please select the ticker from the menu 'Company Info'.")
     st.stop()
 
 with st.sidebar:
@@ -194,32 +222,38 @@ with st.sidebar:
         "Ending Date",
         min_value=start_date,
         max_value=datetime.now().date(),
-        value=datetime.now().date()
+        value="today"
     )
 
     st.subheader('Chart Type')
     chart_type = st.selectbox(
         "Select Chart Type",
-        ["Line Chart", "Candlestick", "Area Chart", "Histogram"]
+        ["Line Chart", "Candlestick", "Area Chart"]
+    )
+    st.subheader('Indicators')
+    indicator_type = st.selectbox(
+        "Select the Overlap Indicator",
+        ["dema", "ema", "sma", "wma"]
     )
 
 ticker = st.session_state['ticker']
 stock_data = retrieve_data(ticker, start_date, end_date)
 
 if not stock_data.empty:
-    st.markdown(f"### {ticker.replace('.AX', '')} Stock Data")
+    st.markdown(f"### {ticker.replace('.AX', '')} Stock Price Information and Trend")
 
     # Display enhanced price metrics
     display_price_metrics(stock_data)
 
     # Display data table
-    with st.expander("View Historical Price Data"):
+    with st.expander("View Historical Price"):
         st.dataframe(
             stock_data[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']],
             hide_index=True,
             use_container_width=True
         )
 
+    indicator_result = calculate_indicators(stock_data, indicator_type)
     # Display enhanced charts
-    visualize_data(stock_data, chart_type)
+    visualize_data(stock_data, chart_type, indicator_type)
     st.session_state['stock_data'] = stock_data
