@@ -1,13 +1,15 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import numpy as np
+
+from plotly.subplots import make_subplots
+from scipy import stats
 
 
 def calculate_statistics(data):
     """Calculate key statistics for the dataset"""
-    stats = {
+    d_stats = {
         'Mean': data['Close'].mean(),
         'Median': data['Close'].median(),
         'Std Dev': data['Close'].std(),
@@ -17,9 +19,11 @@ def calculate_statistics(data):
         'Returns Std': data['Close'].pct_change().std() * 100,
         'Volatility (Annual)': data['Close'].pct_change().std() * np.sqrt(252) * 100,
         'Volume Mean': data['Volume'].mean(),
-        'Volume Median': data['Volume'].median()
+        'Volume Median': data['Volume'].median(),
+        'close_skew': stats.skew(data['Close']),
+        'close_kurtosis': stats.kurtosis(data['Close'])
     }
-    return pd.Series(stats)
+    return pd.Series(d_stats)
 
 
 def create_ohlcv_chart(df, title):
@@ -28,9 +32,10 @@ def create_ohlcv_chart(df, title):
     df['MA5'] = df['Close'].rolling(window=5).mean()
     df['MA20'] = df['Close'].rolling(window=20).mean()
 
+    # Create a plotly figure with two subplots stacked vertically
     fig = make_subplots(rows=2, cols=1,
-                        row_heights=[0.7, 0.3],
-                        vertical_spacing=0.1,
+                        row_heights=[0.6, 0.4],
+                        vertical_spacing=0.2,
                         subplot_titles=(title, 'Volume'))
 
     # Candlestick chart
@@ -52,7 +57,8 @@ def create_ohlcv_chart(df, title):
             x=df.index,
             y=df['MA5'],
             name='5-day MA',
-            line=dict(color='orange', width=1)
+            line=dict(color='orange', width=1),
+            hovertemplate="Date: %{x}<br>Close: $%{y:.2f}<extra></extra>"
         ),
         row=1, col=1
     )
@@ -62,7 +68,8 @@ def create_ohlcv_chart(df, title):
             x=df.index,
             y=df['MA20'],
             name='20-day MA',
-            line=dict(color='blue', width=1)
+            line=dict(color='blue', width=1),
+            hovertemplate="Date: %{x}<br>Close: $%{y:.2f}<extra></extra>"
         ),
         row=1, col=1
     )
@@ -74,7 +81,8 @@ def create_ohlcv_chart(df, title):
             x=df.index,
             y=df['Volume'],
             name='Volume',
-            marker_color=colors
+            marker_color=colors,
+            hovertemplate="Date: %{x}<br>Volume: %{y}"
         ),
         row=2, col=1
     )
@@ -89,7 +97,7 @@ def create_ohlcv_chart(df, title):
     return fig
 
 
-st.title("Basic Descriptive Statistics Analysis")
+st.title("Descriptive Statistics Analysis")
 
 if 'stock_data' in st.session_state:
     # Get the data
@@ -122,7 +130,7 @@ if 'stock_data' in st.session_state:
         st.subheader("Daily Statistics")
         daily_stats = calculate_statistics(df)
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Average Price", f"${daily_stats['Mean']:.2f}")
             st.metric("Daily Returns", f"{daily_stats['Returns Mean']:.2f}%")
@@ -132,6 +140,9 @@ if 'stock_data' in st.session_state:
         with col3:
             st.metric("Avg Daily Volume", f"{daily_stats['Volume Mean']:,.0f}")
             st.metric("Price Range", f"${daily_stats['Max'] - daily_stats['Min']:.2f}")
+        with col4:
+            st.metric("Skewness", f"{daily_stats['close_skew']:.2f}")
+            st.metric("Kurtosis", f"{daily_stats['close_kurtosis']:.2f}")
 
     with tab2:
         st.header("Weekly Price Analysis")
@@ -161,7 +172,13 @@ if 'stock_data' in st.session_state:
             'Daily': daily_stats,
             'Weekly': weekly_stats
         }).round(2)
-        st.dataframe(comp_df)
+        comp_df = comp_df.transpose().style.set_properties(**{'text-align': 'center'}).set_table_styles(
+            [{'selector': 'th', 'props': [('text-align', 'center')]}])
+        st.dataframe(comp_df,
+                     use_container_width=True,
+                     column_config={
+                         col: st.column_config.NumberColumn(width="small") for col in df.columns
+                     })
 
         # Additional weekly specific metrics
         weekly_returns = weekly_df['Close'].pct_change()
@@ -170,9 +187,9 @@ if 'stock_data' in st.session_state:
 
         st.metric(
             "Positive Weeks Ratio",
-            f"{(pos_weeks / total_weeks * 100):.1f}%",
+            f"{(pos_weeks / total_weeks * 100):.2f}%",
             f"{pos_weeks} out of {total_weeks} weeks"
         )
 
 else:
-    st.error("No stock data found. Please ensure data is loaded properly.")
+    st.error("No stock data found. Please select ticker from the menu 'Company Info'.")
